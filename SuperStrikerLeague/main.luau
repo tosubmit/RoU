@@ -7,21 +7,24 @@ if _G.SSL_AutomationConnections then
 end
 _G.SSL_AutomationConnections = {}
 
-if _G.SSL_AutomationWindow then
-    pcall(function() _G.SSL_AutomationWindow:Destroy() end)
+if _G.SSL_Library then
+    pcall(function() _G.SSL_Library:Unload() end)
 end
 
 local currentSession = {}
 _G.CurrentSSLSession = currentSession
 
-local success, Fluent = pcall(function()
-    return loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
+local success, Library = pcall(function()
+    return loadstring(game:HttpGet(repo .. 'Library.lua'))()
 end)
 
-if not success or not Fluent then
+if not success or not Library then
     warn("Failed to load interface provider!")
     return
 end
+
+_G.SSL_Library = Library
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -44,11 +47,19 @@ local State = {
 local Character, RootPart, Humanoid
 local CachedBall = nil
 local CachedGoal = nil
+local BodyVelocity = nil
 
 local function UpdateCharacter(char)
     Character = char
     RootPart = char:WaitForChild("HumanoidRootPart", 5)
     Humanoid = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 5)
+    if RootPart then
+        for _, v in ipairs(RootPart:GetChildren()) do
+            if v:IsA("BodyVelocity") then
+                pcall(function() v:Destroy() end)
+            end
+        end
+    end
 end
 
 if LocalPlayer.Character then
@@ -113,9 +124,21 @@ local function SafeTeleport(targetPos)
     if not root then return end
     local distance = (root.Position - targetPos).Magnitude
     if distance < 1 then return end
-    local maxSpeed = 300
-    local stepDuration = 0.03
-    local stepSize = maxSpeed * stepDuration
+    
+    local ping = 100
+    pcall(function()
+        ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()
+    end)
+    
+    local baseSpeed = 120
+    if ping > 300 then
+        baseSpeed = 35
+    elseif ping > 150 then
+        baseSpeed = 70
+    end
+    
+    local stepDuration = 0.04
+    local stepSize = baseSpeed * stepDuration
     local steps = math.ceil(distance / stepSize)
     for i = 1, steps do
         if not root or not root.Parent then break end
@@ -168,64 +191,65 @@ local function GrabPowerups()
     end
 end
 
-local Window = Fluent:CreateWindow({
-    Title = "Super Striker League",
-    SubTitle = "by github.com/tosubmit",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(580, 460),
-    Acrylic = true,
-    Theme = "Dark",
-    MinimizeKey = Enum.KeyCode.RightShift
+local Window = Library:CreateWindow({
+    Title = 'Super Striker League | by github.com/tosubmit',
+    Center = true,
+    AutoShow = true,
+    TabPadding = 8,
+    MenuFadeTime = 0.2
 })
 
-_G.SSL_AutomationWindow = Window
-
 local Tabs = {
-    Main = Window:AddTab({ Title = "Movement", Icon = "run" }),
-    Automation = Window:AddTab({ Title = "Automation", Icon = "gamepad" })
+    Main = Window:AddTab('Movement'),
+    Automation = Window:AddTab('Automation')
 }
 
-local Toggle = Tabs.Main:AddToggle("VelocityToggle", {
-    Title = "Velocity Optimization",
+local LeftGroupBox = Tabs.Main:AddLeftGroupbox('Velocity & Sprint')
+local RightGroupBox = Tabs.Automation:AddLeftGroupbox('Match Controls')
+
+local VelocityToggle = LeftGroupBox:AddToggle('VelocityToggle', {
+    Text = 'Velocity Optimization',
     Default = false
 })
 
-Toggle:OnChanged(function()
-    State.MovementOptimization = Toggle.Value
+VelocityToggle:OnChanged(function()
+    State.MovementOptimization = VelocityToggle.Value
 end)
 
-local Slider = Tabs.Main:AddSlider("VelocitySlider", {
-    Title = "Velocity Scaling",
-    Min = 16,
-    Max = 200,
+local VelocitySlider = LeftGroupBox:AddSlider('VelocitySlider', {
+    Text = 'Velocity Scaling',
     Default = 20,
+    Min = 16,
+    Max = 100,
     Rounding = 0,
-    Callback = function(Value)
-        State.VelocityScaling = Value
-    end
+    Compact = false
 })
 
-Tabs.Main:AddButton({
-    Title = "Trigger Sprint State",
-    Callback = function()
+VelocitySlider:OnChanged(function()
+    State.VelocityScaling = VelocitySlider.Value
+end)
+
+LeftGroupBox:AddButton({
+    Text = 'Trigger Sprint State',
+    Func = function()
         pcall(function()
             ToggleSprint:FireServer(true)
         end)
     end
 })
 
-local GrabToggle = Tabs.Automation:AddToggle("InteractionToggle", {
-    Title = "Automated Interaction",
+local InteractionToggle = RightGroupBox:AddToggle('InteractionToggle', {
+    Text = 'Automated Interaction',
     Default = false
 })
 
-GrabToggle:OnChanged(function()
-    State.AutomatedInteraction = GrabToggle.Value
+InteractionToggle:OnChanged(function()
+    State.AutomatedInteraction = InteractionToggle.Value
 end)
 
-Tabs.Automation:AddButton({
-    Title = "Relocate to Ball",
-    Callback = function()
+RightGroupBox:AddButton({
+    Text = 'Relocate to Ball',
+    Func = function()
         local ball = GetBall()
         if ball then
             SafeTeleport(ball.Position)
@@ -233,46 +257,67 @@ Tabs.Automation:AddButton({
     end
 })
 
-Tabs.Automation:AddButton({
-    Title = "Relocate to Opposition Goal",
-    Callback = function()
+RightGroupBox:AddButton({
+    Text = 'Relocate to Opposition Goal',
+    Func = function()
         TeleportToOpponentGoal()
     end
 })
 
-Tabs.Automation:AddButton({
-    Title = "Acquire Field Assets",
-    Callback = function()
+RightGroupBox:AddButton({
+    Text = 'Acquire Field Assets',
+    Func = function()
         GrabPowerups()
     end
 })
 
 local lastSprintFire = 0
 local heartbeatConn = RunService.Heartbeat:Connect(function(dt)
-    if not State.MovementOptimization then return end
-    
     local root = GetRoot() or RootPart
     local hum = GetHumanoid() or Humanoid
+    
     if not root or not hum or not root.Parent or not hum.Parent then
         local char = LocalPlayer.Character
         if char then
             RootPart = char:FindFirstChild("HumanoidRootPart")
             Humanoid = char:FindFirstChild("Humanoid")
         end
+        if BodyVelocity then
+            pcall(function() BodyVelocity:Destroy() end)
+            BodyVelocity = nil
+        end
         return
     end
     
-    if hum.MoveDirection.Magnitude > 0 then
-        local now = os.clock()
-        if now - lastSprintFire >= 0.1 then
-            lastSprintFire = now
-            pcall(function()
-                ContinueSprint:FireServer()
-            end)
+    if State.MovementOptimization then
+        if hum.MoveDirection.Magnitude > 0 then
+            if not BodyVelocity or BodyVelocity.Parent ~= root then
+                pcall(function() if BodyVelocity then BodyVelocity:Destroy() end end)
+                BodyVelocity = Instance.new("BodyVelocity")
+                BodyVelocity.MaxForce = Vector3.new(1000000, 0, 1000000)
+                BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+                BodyVelocity.Parent = root
+            end
+            
+            local now = os.clock()
+            if now - lastSprintFire >= 0.1 then
+                lastSprintFire = now
+                pcall(function()
+                    ContinueSprint:FireServer()
+                end)
+            end
+            
+            BodyVelocity.Velocity = hum.MoveDirection * State.VelocityScaling
+        else
+            if BodyVelocity then
+                BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+            end
         end
-        
-        local moveVector = hum.MoveDirection * State.VelocityScaling * dt * 0.5
-        root.CFrame = root.CFrame + moveVector
+    else
+        if BodyVelocity then
+            pcall(function() BodyVelocity:Destroy() end)
+            BodyVelocity = nil
+        end
     end
 end)
 
@@ -284,10 +329,13 @@ task.spawn(function()
             local root = GetRoot() or RootPart
             local ball = GetBall()
             if root and ball then
-                pcall(function()
-                    firetouchinterest(root, ball, 0)
-                    firetouchinterest(root, ball, 1)
-                end)
+                local distance = (root.Position - ball.Position).Magnitude
+                if distance <= 35 then
+                    pcall(function()
+                        firetouchinterest(root, ball, 0)
+                        firetouchinterest(root, ball, 1)
+                    end)
+                end
             end
         end
         task.wait(0.1)
