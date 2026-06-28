@@ -1,3 +1,9 @@
+--[[
+	SuperStrikerLeague
+	Author: tosubmit
+	https://github.com/tosubmit/RoU
+]]
+
 local success, Rayfield = pcall(function()
     return loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 end)
